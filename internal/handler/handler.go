@@ -1,10 +1,10 @@
 package handler
 
 type Handler struct {
-	subscService SubsService
+	subsService SubsService
 }
 
-func New(subscService SubscService) *Handler {
+func New(subsService SubsService) *Handler {
 	return &Handler{
 		subsService: SubsService,
 	}

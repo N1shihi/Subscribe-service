@@ -30,11 +30,11 @@ func main() {
 		}
 	}()
 
-	subRepo := repository.NewSubRepository(db)
+	subsRepo := repository.NewSubsRepository(db)
 
-	SubService := service.NewSubService(teamRepo)
+	subsService := service.NewSubsService(subsRepo)
 
-	h := handler.New(subService)
+	h := handler.New(subsService)
 
 	srv := server.New(cfg, db)
 	go func() {

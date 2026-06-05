@@ -11,7 +11,8 @@ import (
 
 type SubsService interface {
 	CreateSubs(team models.Subscription) error
-	GetSubs(subsId uuid.UUID) (models.Subscription, error)
+	GetSubs(userId uuid.UUID) (models.Subscription, error)
+	DeleteSubs(subs models.SubscriptionDelete) error
 }
 
 func (h *Handler) CreateSubsHandler(c *gin.Context) {
@@ -42,9 +43,9 @@ func (h *Handler) CreateSubsHandler(c *gin.Context) {
 	})
 }
 
-func (h *Handler) GetTeam(c *gin.Context) {
-	teamName := c.Query("team_name")
-	if teamName == "" {
+func (h *Handler) GetSubs(c *gin.Context) {
+	userId := c.Query("user_id")
+	if userId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": gin.H{
 				"code":    "BAD_REQUEST",
@@ -54,13 +55,15 @@ func (h *Handler) GetTeam(c *gin.Context) {
 		return
 	}
 
-	team, err := h.teamService.GetTeam(teamName)
+	subscriptions, err := h.subsService.GetSubs(userId)
+
+	// поменять проверки
 	if err != nil {
-		if err.Error() == "team not found" {
+		if err.Error() == "subs not found" {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": gin.H{
 					"code":    "NOT_FOUND",
-					"message": "team not found",
+					"message": "subs not found",
 				},
 			})
 		} else {
@@ -74,5 +77,25 @@ func (h *Handler) GetTeam(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, team)
+	c.JSON(http.StatusOK, subscriptions)
+}
+func (h *Handler) DeleteSubs(c *gin.Context) {
+	var subs models.SubscriptionDelete
+	if err := c.ShouldBindJSON(&subs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "BAD_REQUEST",
+				"message": err.Error(),
+			},
+		})
+		return
+	}
+
+	err := h.subsService.DeleteSubs(subs)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(200)
 }
