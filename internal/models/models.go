@@ -1,20 +1,25 @@
 package models
 
 import (
-	"time"
-
 	"github.com/google/uuid"
 )
 
 type Subscription struct {
-	Service_name string
-	Price        int64
-	User_id      uuid.UUID
-	Start_date   time.Time // В тз месяц-год 07-2025
-	End_date     time.Time //
+	ServiceName string    `json:"service_name"`
+	Price       int64     `json:"price"`
+	UserID      uuid.UUID `json:"user_id"`
+	StartDate   string    `json:"start_date"`
+	EndDate     *string   `json:"end_date,omitempty"`
 }
 
 type SubscriptionDelete struct {
-	Service_name string
-	User_id      uuid.UUID
+	ServiceName string    `json:"service_name"`
+	UserID      uuid.UUID `json:"user_id"`
+}
+
+type AggregateRequest struct {
+	UserID      string `json:"user_id"`
+	ServiceName string `json:"service_name"`
+	StartDate   string `json:"from"` // "07-2025"
+	EndDate     string `json:"to"`   // "08-2025"
 }

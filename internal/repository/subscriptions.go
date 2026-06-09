@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 type SubsRepository struct {
@@ -12,88 +15,240 @@ type SubsRepository struct {
 }
 
 func NewSubsRepository(db *sql.DB) *SubsRepository {
-	return &SubsRepository{
-		db: db,
-	}
+	return &SubsRepository{db: db}
 }
 
-func (r *SubsRepository) GetSubsById(id int) (*models.Team, error) {
-	log.SetPrefix("repository.TeamRepository.GetTeamByName: ")
+func nullableString(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
 
-	var subsExists bool
-	err := r.db.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM teams WHERE subs_id = $1)",
-		name,
-	).Scan(&teamExists)
+func scanSubscription(row interface {
+	Scan(dest ...any) error
+}) (*models.Subscription, error) {
+	var sub models.Subscription
+	var endDate sql.NullString
+
+	err := row.Scan(
+		&sub.ServiceName,
+		&sub.Price,
+		&sub.UserID,
+		&sub.StartDate,
+		&endDate,
+	)
 	if err != nil {
-		log.Printf("error checking team existence: %v", err)
-		return nil, fmt.Errorf("database error")
+		return nil, err
 	}
 
-	if !teamExists {
-		return nil, fmt.Errorf("team not found")
+	if endDate.Valid {
+		sub.EndDate = &endDate.String
 	}
 
-	query := `
-        SELECT user_id, username, is_active
-        FROM users
-        WHERE team_name = $1
-    `
-	rows, err := r.db.Query(query, name)
-	if err != nil {
-		log.Printf("error querying team users: %v", err)
-		return nil, fmt.Errorf("database error")
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	team := &models.Team{
-		TeamName: name,
-		Members:  []models.TeamMember{},
-	}
-
-	for rows.Next() {
-		var member models.TeamMember
-		if err := rows.Scan(&member.UserID, &member.Username, &member.IsActive); err != nil {
-			log.Printf("error scanning user row: %v", err)
-			return nil, fmt.Errorf("database error")
-		}
-		team.Members = append(team.Members, member)
-	}
-
-	if err = rows.Err(); err != nil {
-		log.Printf("rows iteration error: %v", err)
-		return nil, fmt.Errorf("database error")
-	}
-
-	log.Printf("successfully retrieved team '%s' with %d members", name, len(team.Members))
-	return team, nil
+	return &sub, nil
 }
 
 func (r *SubsRepository) CreateSubs(subs *models.Subscription) error {
-	log.SetPrefix("repository.SubsRepository.CreateSubs: ")
+	if _, err := r.db.Exec(`
+		INSERT INTO subscriptions (
+			service_name,
+			price,
+			user_id,
+			start_date,
+			end_date
+		)
+		VALUES ($1, $2, $3, $4, $5)
+	`, subs.ServiceName, subs.Price, subs.UserID, subs.StartDate, nullableString(subs.EndDate)); err != nil {
 
-	tx, err := r.db.Begin()
-	if err != nil {
-		log.Printf("begin tx error: %v", err)
+		log.Printf("repository create subscription failed user %s service %s error %v",
+			subs.UserID.String(), subs.ServiceName, err)
+
 		return fmt.Errorf("database error")
 	}
 
-	_, err = tx.Exec(`
-        INSERT INTO subscriptions (service_name, price, user_id, start_date, end_date)
-        VALUES ($1, $2, $3, $4,$5)
-    `, subs.Service_name, subs.Price, subs.User_id, subs.Start_date, subs.End_date)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("database error")
-	}
-
-	if err = tx.Commit(); err != nil {
-		log.Printf("commit tx error: %v", err)
-		return fmt.Errorf("database error")
-	}
-
-	log.Printf("created subscription '%s' ", subs.Service_name)
 	return nil
+}
+
+func (r *SubsRepository) GetSubs(userID uuid.UUID, serviceName string) (*models.Subscription, error) {
+	row := r.db.QueryRow(`
+		SELECT service_name, price, user_id, start_date, end_date
+		FROM subscriptions
+		WHERE user_id = $1 AND service_name = $2
+	`, userID, serviceName)
+
+	sub, err := scanSubscription(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("subscription not found")
+		}
+
+		log.Printf("repository get subscription error user %s service %s error %v",
+			userID.String(), serviceName, err)
+
+		return nil, fmt.Errorf("database error")
+	}
+
+	return sub, nil
+}
+
+func (r *SubsRepository) GetAllSubs() ([]models.Subscription, error) {
+	rows, err := r.db.Query(`
+		SELECT service_name, price, user_id, start_date, end_date
+		FROM subscriptions
+		ORDER BY user_id, service_name
+	`)
+	if err != nil {
+		log.Printf("repository get all subscriptions error %v", err)
+		return nil, fmt.Errorf("database error")
+	}
+	defer rows.Close()
+
+	subs := make([]models.Subscription, 0)
+
+	for rows.Next() {
+		var sub models.Subscription
+		var endDate sql.NullString
+
+		if err := rows.Scan(
+			&sub.ServiceName,
+			&sub.Price,
+			&sub.UserID,
+			&sub.StartDate,
+			&endDate,
+		); err != nil {
+
+			log.Printf("repository scan subscription error %v", err)
+			return nil, fmt.Errorf("database error")
+		}
+
+		if endDate.Valid {
+			sub.EndDate = &endDate.String
+		}
+
+		subs = append(subs, sub)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("repository rows iteration error %v", err)
+		return nil, fmt.Errorf("database error")
+	}
+
+	return subs, nil
+}
+
+func (r *SubsRepository) UpdateSubs(subs *models.Subscription) error {
+	res, err := r.db.Exec(`
+		UPDATE subscriptions
+		SET price = $1,
+			start_date = $2,
+			end_date = $3
+		WHERE user_id = $4 AND service_name = $5
+	`, subs.Price, subs.StartDate, nullableString(subs.EndDate), subs.UserID, subs.ServiceName)
+
+	if err != nil {
+		log.Printf("repository update subscription error user %s service %s error %v",
+			subs.UserID.String(), subs.ServiceName, err)
+
+		return fmt.Errorf("database error")
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		log.Printf("repository update rows affected error %v", err)
+		return fmt.Errorf("database error")
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("subscription not found")
+	}
+
+	return nil
+}
+
+func (r *SubsRepository) DeleteSubs(userID uuid.UUID, serviceName string) error {
+	res, err := r.db.Exec(`
+		DELETE FROM subscriptions
+		WHERE user_id = $1 AND service_name = $2
+	`, userID, serviceName)
+
+	if err != nil {
+		log.Printf("repository delete subscription error user %s service %s error %v",
+			userID.String(), serviceName, err)
+
+		return fmt.Errorf("database error")
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		log.Printf("repository delete rows affected error %v", err)
+		return fmt.Errorf("database error")
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("subscription not found")
+	}
+
+	return nil
+}
+
+func parseMonthYear(v string) (time.Time, error) {
+	return time.Parse("01-2006", v)
+}
+
+func (r *SubsRepository) GetSubsSum(req models.AggregateRequest) (int, error) {
+	query := `
+		SELECT COALESCE(SUM(price), 0)
+		FROM subscriptions
+		WHERE 1=1
+	`
+
+	args := make([]any, 0)
+
+	if req.UserID != "" {
+		userID, err := uuid.Parse(req.UserID)
+		if err != nil {
+			return 0, fmt.Errorf("invalid user_id")
+		}
+
+		args = append(args, userID)
+		query += fmt.Sprintf(" AND user_id = $%d", len(args))
+	}
+
+	if req.ServiceName != "" {
+		args = append(args, req.ServiceName)
+		query += fmt.Sprintf(" AND service_name = $%d", len(args))
+	}
+
+	if req.StartDate != "" {
+		fromDate, err := parseMonthYear(req.StartDate)
+		if err != nil {
+			return 0, fmt.Errorf("invalid start date")
+		}
+
+		args = append(args, fromDate)
+		query += fmt.Sprintf(
+			" AND (to_date(end_date, 'MM-YYYY') IS NULL OR to_date(end_date, 'MM-YYYY') >= $%d)",
+			len(args),
+		)
+	}
+
+	if req.EndDate != "" {
+		toDate, err := parseMonthYear(req.EndDate)
+		if err != nil {
+			return 0, fmt.Errorf("invalid end date")
+		}
+
+		args = append(args, toDate)
+		query += fmt.Sprintf(" AND to_date(start_date, 'MM-YYYY') <= $%d", len(args))
+	}
+
+	var total int
+
+	if err := r.db.QueryRow(query, args...).Scan(&total); err != nil {
+		log.Printf("repository aggregate query error %v", err)
+		return 0, fmt.Errorf("database error")
+	}
+
+	return total, nil
 }

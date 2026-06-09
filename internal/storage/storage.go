@@ -23,7 +23,7 @@ func New(cfg *config.Config) (*sql.DB, error) {
 
 	db, err := sql.Open("postgres", conStr)
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, fmt.Errorf("db open error: %w", err)
 	}
 
 	const (
@@ -31,18 +31,17 @@ func New(cfg *config.Config) (*sql.DB, error) {
 		delay       = 2 * time.Second
 	)
 
-	var pingErr error
 	for i := 1; i <= maxAttempts; i++ {
-		pingErr = db.Ping()
-		if pingErr == nil {
-			log.Printf("db ping succeeded on attempt %d", i)
+		if err := db.Ping(); err == nil {
+			log.Printf("db connected after %d attempts", i)
 			return db, nil
+		} else {
+			log.Printf("db connection attempt %d failed", i)
 		}
 
-		log.Printf("db ping failed (attempt %d/%d): %v", i, maxAttempts, pingErr)
 		time.Sleep(delay)
 	}
 
 	_ = db.Close()
-	return nil, fmt.Errorf("ping db: %w", pingErr)
+	return nil, fmt.Errorf("database is unreachable after %d attempts", maxAttempts)
 }

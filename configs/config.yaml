@@ -5,7 +5,7 @@ http_server:
 database:
   host: "postgres"
   port: "5432"
-  user: "admin"
-  password: "admin1234"
-  name: "orders_db"
+  user: "postgres"
+  password: "postgres"
+  name: "subscriptions"
   sslmode: "disable"

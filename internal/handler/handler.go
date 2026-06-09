@@ -6,6 +6,6 @@ type Handler struct {
 
 func New(subsService SubsService) *Handler {
 	return &Handler{
-		subsService: SubsService,
+		subsService: subsService,
 	}
 }

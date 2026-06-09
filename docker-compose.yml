@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:latest
+
+    container_name: postgres
+
+    restart: always
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: subscriptions
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d subscriptions"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+
+    image: migrate/migrate
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    volumes:
+      - ./db/migrations:/migrations
+
+    command:
+      [
+        "-path",
+        "/migrations",
+        "-database",
+        "postgres://postgres:postgres@postgres:5432/subscriptions?sslmode=disable",
+        "up"
+      ]
+
+  app:
+
+    build: .
+
+    container_name: subscribe-service
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+    ports:
+      - "8080:8080"
+
+    restart: unless-stopped
+
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      - CONFIG_PATH=/app/configs/config.yaml
+
+volumes:
+
+  postgres_data:
